@@ -85,11 +85,20 @@
       <div class="plc-pane" data-pane="link">
         <fieldset class="plc-access"><legend>หน้าที่ของเว็บ</legend>
           <label><input type="radio" name="access" value="readwrite"><span><b>จำลองเครื่องจักร</b><small>เว็บเขียน Input (X) · PLC สั่ง Output (Y) ให้ 3D ขยับ</small></span></label>
+          <label><input type="radio" name="access" value="buttons"><span><b>เซนเซอร์จาก PLC · ใช้ปุ่มได้</b><small>อ่านเซนเซอร์/X จาก PLC จริง · เว็บเขียนเฉพาะปุ่มที่กดบนตู้ 3D</small></span></label>
           <label><input type="radio" name="access" value="read"><span><b>Monitor อย่างเดียว</b><small>อ่าน X/Y มาแสดง ไม่เขียนค่าใดๆ ไปที่ PLC</small></span></label>
         </fieldset>
         <p class="plc-warn" id="plc-warn" hidden>⚠ โหมดนี้เขียนค่าลง PLC จริง ถ้า Output ต่อกับมอเตอร์หรือวาล์วจริง เครื่องจะขยับตาม ให้ตัดไฟ/ลมของอุปกรณ์ก่อน หรือเลือก Monitor อย่างเดียว</p>
+        <p class="plc-warn" id="plc-warn-btn" hidden>⚠ ปุ่มบนตู้ 3D จะสั่งเครื่องจริงได้ (E-stop ไม่ถูกเขียน) · ปุ่มที่ใช้ X ที่มีสายจริง PLC จะเขียนทับทุกสแกน ให้เปลี่ยน Address ของปุ่มในตาราง I/O เป็น M (เช่น M101) แล้วใน Ladder ใช้ X1 OR M101</p>
         <div class="plc-row"><label>เลข X/Y<select name="xyBase"><option value="8">ฐาน 8 · FX5 (iQ-F)</option><option value="16">ฐาน 16 · iQ-R / Q</option></select></label>
           <label>อ่านทุก (ms)<input name="pollMs" type="number" min="20" max="2000" step="10"></label></div>
+        <div class="plc-motion">
+          <div class="plc-motion-head"><span>ความเร็วในโมเดล 3D (โหมด PLC)</span><button type="button" id="plc-motion-reset" class="plc-ghost">ค่าเริ่มต้น</button></div>
+          <label><span>กระบอกป้อนชิ้นงาน · เวลาดันสุด</span><input type="range" data-m="feed" min="0.1" max="3" step="0.05"><output data-m="feed"></output></label>
+          <label><span>กระบอกคัด A/B · เวลาดันสุด</span><input type="range" data-m="sort" min="0.1" max="3" step="0.02"><output data-m="sort"></output></label>
+          <label><span>ความเร็วสายพาน</span><input type="range" data-m="belt" min="0.2" max="3" step="0.05"><output data-m="belt"></output></label>
+          <small>มีผลทันที ไม่ต้องเชื่อมต่อใหม่ · ใช้ปรับให้ 3D เคลื่อนที่ใกล้เคียงเครื่องจริงหรือเข้ากับ Timer ใน Ladder</small>
+        </div>
       </div>
       <p class="plc-test" id="plc-test" aria-live="polite"></p>
     </div>
@@ -122,10 +131,28 @@
     const m = form.mode.value;
     dlg.querySelectorAll('.plc-pane').forEach((p) => { p.hidden = p.dataset.pane === 'link' ? m === 'off' : p.dataset.pane !== m; });
     $('#plc-warn', dlg).hidden = !(m === 'real' && form.access.value === 'readwrite');
+    $('#plc-warn-btn', dlg).hidden = !(m === 'real' && form.access.value === 'buttons');
     $('#plc-go', dlg).textContent = m === 'off' ? 'ใช้การจำลองในเว็บ' : 'เชื่อมต่อ';
     $('#plc-test-btn', dlg).hidden = m === 'off';
   }
   form.addEventListener('change', syncPanes);
+
+  // Motion speeds used by app.js in PLC mode: cylinder stroke times (s) and belt speed (x default).
+  const MOTION_KEY = 'induvara-motion-v1', MOTION_DEF = { feed: 0.9, sort: 0.42, belt: 1 };
+  P.motion = { ...MOTION_DEF };
+  try { Object.assign(P.motion, JSON.parse(localStorage.getItem(MOTION_KEY) || '{}')); } catch {}
+  const fmtMotion = (k, v) => (k === 'belt' ? `${Math.round(v * 100)}%` : `${v.toFixed(2)} s`);
+  function paintMotion() {
+    dlg.querySelectorAll('.plc-motion input[data-m]').forEach((i) => { i.value = P.motion[i.dataset.m]; });
+    dlg.querySelectorAll('.plc-motion output[data-m]').forEach((o) => { o.textContent = fmtMotion(o.dataset.m, P.motion[o.dataset.m]); });
+  }
+  function saveMotion() { try { localStorage.setItem(MOTION_KEY, JSON.stringify(P.motion)); } catch {} }
+  dlg.querySelector('.plc-motion').addEventListener('input', (e) => {
+    const k = e.target.dataset && e.target.dataset.m; if (!k) return;
+    P.motion[k] = +e.target.value; paintMotion(); saveMotion();
+  });
+  $('#plc-motion-reset', dlg).onclick = () => { P.motion = { ...MOTION_DEF }; paintMotion(); saveMotion(); };
+  paintMotion();
   dlg.addEventListener('click', (e) => { if (e.target === dlg || e.target.closest('[data-close]')) dlg.close(); });
 
   const testOut = $('#plc-test', dlg);
@@ -174,14 +201,14 @@
     const box = $('#plc-status', dlg);
     box.className = 'plc-status ' + s;
     $('b', box).textContent = text;
-    $('small', box).textContent = [st.info, st.state === 'connected' && st.access === 'read' ? 'Monitor อย่างเดียว' : '', st.pollMs != null && s === 'connected' ? `อ่านรอบละ ${st.pollMs} ms` : '', st.error].filter(Boolean).join(' · ');
+    $('small', box).textContent = [st.info, st.state === 'connected' && st.access === 'read' ? 'Monitor อย่างเดียว' : st.state === 'connected' && st.access === 'buttons' ? 'เซนเซอร์จาก PLC · ใช้ปุ่มได้' : '', st.pollMs != null && s === 'connected' ? `อ่านรอบละ ${st.pollMs} ms` : '', st.error].filter(Boolean).join(' · ');
     const badge = document.querySelector('header .badge');
     if (badge) {
       badge.className = 'badge ' + s;
       badge.innerHTML = `<i></i> ${s === 'connected' ? (P.mode === 'sim' ? 'GX SIMULATOR3' : 'PLC · ' + esc(P.status.info || '').split(' ')[1]) + ' · ONLINE' : s === 'off' ? 'SIMULATION · OFFLINE' : s === 'connecting' ? 'CONNECTING…' : 'PLC · ERROR'}`;
     }
     const foot = document.getElementById('link-text');
-    if (foot) foot.textContent = s === 'connected' ? `เชื่อมต่อ ${P.status.info} · ${P.access === 'read' ? 'Monitor' : 'จำลองเครื่องจักร'}` : s === 'off' ? 'การเชื่อมต่อ PLC ปิดอยู่' : text;
+    if (foot) foot.textContent = s === 'connected' ? `เชื่อมต่อ ${P.status.info} · ${P.access === 'read' ? 'Monitor' : P.access === 'buttons' ? 'เซนเซอร์จาก PLC · ใช้ปุ่มได้' : 'จำลองเครื่องจักร'}` : s === 'off' ? 'การเชื่อมต่อ PLC ปิดอยู่' : text;
     const btn = document.getElementById('plc-open');
     if (btn) { btn.classList.toggle('on', s === 'connected'); btn.classList.toggle('err', s === 'error'); }
   }
@@ -202,7 +229,9 @@
     P.connected = st.state === 'connected';
     if (P.connected && !was) { lastSent = {}; sendWatch(); }
     paint(); emit();
-    window.ioTable && window.ioTable.refresh();
+    // Re-render the I/O table only when the link comes up or goes down: status events arrive
+    // continuously, and rebuilding the table each time swallowed tab clicks and input focus.
+    if (P.connected !== was) window.ioTable && window.ioTable.refresh();
   }
 
   async function sendWatch() {
@@ -211,10 +240,22 @@
     try { await api('/api/watch', { devices: [...b.inputs, ...b.outputs].map((x) => x.addr), outputs: b.outputs.map((x) => x.addr) }); } catch {}
   }
 
+  // Operator controls on the 3D cabinet. E-stops (estopOk) are deliberately not here: on a real
+  // machine the web must never be able to hold an emergency-stop input in the 'OK' state.
+  const BUTTON_SIGS = new Set(['masterOn', 'controlPower', ...Array.from({ length: 8 }, (_, i) => 'pbIn' + i)]);
+  let lastFull = 0;
   async function syncInputs() {
-    if (!P.connected || P.access !== 'readwrite' || inflight || Date.now() < backoff) return;
+    if (!P.connected || P.access === 'read' || inflight || Date.now() < backoff) return;
+    // A hidden tab's 3D model is paused: its inputs are stale, so it must not write them over
+    // the inputs of the page that is actually being used.
+    if (document.hidden) { lastSent = {}; return; }
+    // Re-send every input once a second (one batched write), so a value overwritten by another
+    // page or by the PLC side is corrected instead of staying wrong until it next changes.
+    if (Date.now() - lastFull > 1000) { lastFull = Date.now(); lastSent = {}; }
     const want = {};
-    for (const b of bindings().inputs) if (b.sig) want[b.addr] = (P.inputs[b.sig] || P.pressed[b.sig]) ? 1 : 0;
+    // 'buttons': sensors come from the real PLC, so only the cabinet push buttons/selectors are written.
+    const onlyButtons = P.access === 'buttons';
+    for (const b of bindings().inputs) if (b.sig && (!onlyButtons || BUTTON_SIGS.has(b.sig))) want[b.addr] = (onlyButtons ? P.pressed[b.sig] : (P.inputs[b.sig] || P.pressed[b.sig])) ? 1 : 0;
     const writes = [];
     for (const [a, v] of Object.entries(want)) if (lastSent[a] !== v) writes.push({ device: a, value: v });
     // An address removed from the table: release it once, then forget it.
@@ -234,7 +275,7 @@
 
   // Leaving the page: drop every input this page set (E-stop NC inputs going to 0 = stopped, the safe side).
   window.addEventListener('pagehide', () => {
-    if (!P.connected || P.access !== 'readwrite') return;
+    if (!P.connected || P.access === 'read') return;
     const writes = Object.keys(lastSent).map((a) => ({ device: a, value: 0 }));
     if (writes.length) navigator.sendBeacon('/api/write', new Blob([JSON.stringify({ writes })], { type: 'application/json' }));
   });
@@ -254,7 +295,7 @@
     es.addEventListener('reset', () => { P.values = {}; lastSent = {}; emit(); });
     es.onerror = () => setStatus({ state: 'error', mode: P.mode, error: 'ติดต่อ server ไม่ได้ · เปิด start.bat ค้างไว้หรือไม่?' });
     window.ioTable && window.ioTable.onChange(() => { sendWatch(); emit(); });
-    const cfgSync = setInterval(async () => { try { const c = await api('/api/config'); if (c.xyBase !== P.xyBase) { P.xyBase = c.xyBase; sendWatch(); } } catch {} }, 4000);
+    const cfgSync = setInterval(async () => { try { const c = await api('/api/config'); if (c.xyBase !== P.xyBase) { P.xyBase = c.xyBase; sendWatch(); window.ioTable && window.ioTable.refresh(); } } catch {} }, 4000);
     void cfgSync;
   }
   paint();

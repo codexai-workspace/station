@@ -18,13 +18,13 @@ const HOST = process.env.HOST || '127.0.0.1';
 
 const DEFAULT_CONFIG = {
   mode: 'off',               // 'off' | 'sim' (GX Simulator3 via MX Component) | 'real' (SLMP over LAN)
-  access: 'readwrite',       // 'readwrite' = twin plays the machine (writes inputs) | 'read' = monitor only
+  access: 'readwrite',       // 'readwrite' = twin plays the machine (writes inputs) | 'buttons' = sensors from the PLC, twin writes only its push buttons | 'read' = monitor only
   station: 1,                // MX Component logical station number (Communication Setup Utility)
   python: 'python',          // Python that has pywin32 (32-bit for MX Component v4)
   host: '192.168.3.250',     // FX5U factory default IP
   port: 5007,                // SLMP Connection Module port set in GX Works3
   xyBase: 8,                 // FX5 (iQ-F) = octal, iQ-R/Q = 16
-  pollMs: 60,
+  pollMs: 30,
 };
 
 let config = loadConfig();
@@ -111,12 +111,17 @@ async function pollOnce() {
   const gen = generation;
   const t0 = Date.now();
   const changed = {};
-  // In simulate mode the page itself drives the inputs, so outputs are read every cycle and
-  // inputs only every 5th (each MX Component call costs ~30 ms on GX Simulator3).
-  const list = config.access === 'readwrite' && cycle++ % 5 && watchOut.length ? watchOut : watch;
+  // A client that batches (MX: readBlocks = one MX call per poll) reads everything every cycle.
+  // Otherwise, in simulate mode the page itself drives the inputs, so outputs are read every
+  // cycle and inputs only every 5th.
+  const list = !c.readBlocks && config.access === 'readwrite' && cycle++ % 5 && watchOut.length ? watchOut : watch;
   try {
-    for (const b of plan(list)) {
-      const vals = await c.readBits(name(b.dev, b.start, config.xyBase), b.count);
+    const blocks = plan(list);
+    const results = c.readBlocks
+      ? await c.readBlocks(blocks.map((b) => ({ addr: name(b.dev, b.start, config.xyBase), n: b.count })))
+      : [];
+    for (const [bi, b] of blocks.entries()) {
+      const vals = c.readBlocks ? results[bi] : await c.readBits(name(b.dev, b.start, config.xyBase), b.count);
       vals.forEach((v, i) => {
         const key = name(b.dev, b.start + i, config.xyBase);
         if (!watch.includes(key)) return;
@@ -133,14 +138,22 @@ async function pollOnce() {
   }
 }
 
-let timer = null, cycle = 0;
+// Exactly one poll loop. pollSoon() used to start an extra loop whenever it was called while a
+// poll was in flight (every /api/write does that), so loops piled up, all queued on the single
+// MX Component bridge, and a read could take seconds. Now an early poll is only requested.
+let timer = null, cycle = 0, polling = false, soon = false;
 async function loop() {
+  timer = null;
+  polling = true; soon = false;
   const t = Date.now();
-  await pollOnce();
-  const wait = client && client.connected ? config.pollMs : 2000;
-  timer = setTimeout(loop, Math.max(10, wait - (Date.now() - t)));
+  try { await pollOnce(); } finally { polling = false; }
+  const wait = soon ? 0 : client && client.connected ? config.pollMs : 2000;
+  timer = setTimeout(loop, Math.max(soon ? 0 : 10, wait - (Date.now() - t)));
 }
-function pollSoon() { if (timer) { clearTimeout(timer); timer = setTimeout(loop, 5); } }
+function pollSoon() {
+  if (polling) { soon = true; return; }             // the running poll schedules the next one right away
+  if (timer) { clearTimeout(timer); timer = setTimeout(loop, 5); }
+}
 loop();
 
 function reconfigure(patch) {
@@ -163,7 +176,7 @@ function reconfigure(patch) {
 function sanitize(c) {
   const out = { ...DEFAULT_CONFIG, ...c };
   if (!['off', 'sim', 'real'].includes(out.mode)) out.mode = 'off';
-  if (!['read', 'readwrite'].includes(out.access)) out.access = 'readwrite';
+  if (!['read', 'readwrite', 'buttons'].includes(out.access)) out.access = 'readwrite';
   out.station = Math.max(0, Math.min(1023, parseInt(out.station, 10) || 1));
   out.port = Math.max(1, Math.min(65535, parseInt(out.port, 10) || 5007));
   out.xyBase = Number(out.xyBase) === 16 ? 16 : 8;
@@ -174,7 +187,7 @@ function sanitize(c) {
 }
 
 async function writeMany(list) {
-  if (config.access !== 'readwrite') throw new Error('โหมดอ่านอย่างเดียว: ไม่อนุญาตให้เขียนค่าไปที่ PLC');
+  if (config.access === 'read') throw new Error('โหมดอ่านอย่างเดียว: ไม่อนุญาตให้เขียนค่าไปที่ PLC');
   if (!client || !client.connected) throw new Error('ยังไม่ได้เชื่อมต่อ PLC');
   const clean = list.map((w) => {
     const d = parse(w.device, config.xyBase);

@@ -88,10 +88,12 @@ function beltMove(v,dt){beltSurfaceV=v;if(v)beltLastT=performance.now();if(!v)re
  cyl(.075,.2,steel,0,0,-.66,'z',motorSpin);
 }
 // Receiving chutes open upward, declining toward front.
+// Chute A / sort pusher A position along the belt (moved out from the centre).
+const CHUTE_A_X=-2.6, CHUTE_B_X=3.7;
 const chuteAngle=-.24, chuteCenterY=1.0, chuteCenterZ=-3.2;
 function chute(x,label){const g=new T.Group();machine.add(g);g.position.set(x,chuteCenterY,chuteCenterZ);g.rotation.x=chuteAngle;box(1.04,.045,2.35,steel,0,0,-.375,g);// Stop side walls outside the belt edge (world Z = -2.32), including their tilted top corners.
 for(const dx of [-.53,.53])box(.045,.22,2.41,brushed,dx,.09,-.405,g);// End stop shares the chute rotation, so its face is perpendicular to the sloped bed.
-box(1.105,.2225,.06,brushed,0,.08875,-1.58,g);box(1.1,.05,.15,alu,0,-.1,.70,g);return g;}chute(-2.1,'CHUTE A');chute(3,'CHUTE B');
+box(1.105,.2225,.06,brushed,0,.08875,-1.58,g);box(1.1,.05,.15,alu,0,-.1,.70,g);return g;}chute(CHUTE_A_X,'CHUTE A');chute(CHUTE_B_X,'CHUTE B');
 // Pneumatic cylinders: barrel, tie rods, caps, fittings, reed switches.
 const actuators=[];
 // SMC CDM2-style round air cylinder: polished stainless barrel with printed label, round aluminium
@@ -163,7 +165,7 @@ function posePart(mesh,z){mesh.position.z=z;const onChute=z<=chuteEntryZ;const s
  mesh.position.y=onChute?surfaceY:T.MathUtils.lerp(partRestY,chuteCenterY-.8*Math.sin(chuteAngle)+(.045/2+partBevel)/Math.cos(chuteAngle),Math.max(0,(-1.75-z)/(-1.75-chuteEntryZ)));mesh.rotation.x=-Math.PI/2+(onChute?chuteAngle:0);}
 // Pushed part: follows the face while on the belt edge, then slides down the chute on its own.
 function pushPart(zp,e,stopZ,dt){if(zp>chuteEntryZ)return Math.min(zp,sortFace(e)-PART_R);return Math.max(stopZ,zp-dt*5.5);}
-actuator(-2.1,SORT_Z);actuator(3,SORT_Z);actuator(0,FEED_Z,true);
+actuator(CHUTE_A_X,SORT_Z);actuator(CHUTE_B_X,SORT_Z);actuator(0,FEED_Z,true);
 // ---------- Rigid-body physics for parts leaving the belt (virtual-commissioning style) ----------
 // Each part is a solid disc (mass 1, disc inertia). Contacts are sampled on both rims against the
 // machine's collision shapes: moving belt (surface speed drives the part), head/tail pulleys (round),
@@ -254,7 +256,7 @@ function updateDrops(dt){
  while(bodies.length>14){const i=bodies.findIndex(x=>x.asleep);if(i<0)break;machine.remove(bodies[i].mesh);bodies.splice(i,1);}
  beltSurfaceV=0;}
 // Hollow magazine with exposed rim and lower feed slot.
-const mag=new T.Group();machine.add(mag);mag.position.set(0,1.3,-.15);const ring=new T.Shape();ring.absarc(0,0,.49,0,Math.PI*2,false);const hole=new T.Path();hole.absarc(0,0,.435,0,Math.PI*2,true);ring.holes.push(hole);const mg=new T.Mesh(new T.ExtrudeGeometry(ring,{depth:3.55,bevelEnabled:false,steps:1,curveSegments:64}),steel);mg.rotation.x=-Math.PI/2;mg.position.y=.33;mg.castShadow=true;mag.add(mg);cyl(.54,.12,alu,0,.24,0,'y',mag);for(const x of [-.49,.49])box(.12,.45,.75,brushed,x,.1,0,mag);box(1.35,.1,1.35,alu,0,-.19,0,mag);for(const x of [-.58,.58])bolt(x,-.12,.5,mag);
+const mag=new T.Group();machine.add(mag);mag.position.set(0,1.3,-.15);const ring=new T.Shape();ring.absarc(0,0,.49,0,Math.PI*2,false);const hole=new T.Path();hole.absarc(0,0,.435,0,Math.PI*2,true);ring.holes.push(hole);const mg=new T.Mesh(new T.ExtrudeGeometry(ring,{depth:3.55,bevelEnabled:false,steps:1,curveSegments:64}),steel.clone());mg.rotation.x=-Math.PI/2;mg.position.y=.33;mg.castShadow=true;mag.add(mg);cyl(.54,.12,alu,0,.24,0,'y',mag);for(const x of [-.49,.49])box(.12,.45,.75,brushed,x,.1,0,mag);box(1.35,.1,1.35,alu,0,-.19,0,mag);for(const x of [-.58,.58])bolt(x,-.12,.5,mag);
 // Three downward-looking sensor brackets across the conveyor.
 // Demonstration presets, not measured sensor specifications. PHOTO assumes a
 // reflective sensor adjusted so the black sample is below its threshold.
@@ -318,7 +320,7 @@ for(const item of machine.children.slice(valveStart))item.position.z+=.95;
 tube([[-3.05,1.65,3.05],[-2.90,1.65,3.05],[-2.78,1.52,3.25],[-2.78,1.15,3.25],[-2.55,1.10,3.18]],blue,.032);
 // Dedicated paired lines: buried trunk sections, then short service loops at each cylinder.
 // No decorative open-ended hoses across the front of the station.
-const pneumaticRoutes=[{x:-2.1,z:.43},{x:0,z:1.7},{x:3,z:.43}];
+const pneumaticRoutes=[{x:CHUTE_A_X,z:.43},{x:0,z:1.7},{x:CHUTE_B_X,z:.43}];
 for(const [i,unit] of pneumaticRoutes.entries()){
  const valveX=-2.95+i*.4;
  for(const [j,portZ] of [-.66,.92].entries()){
@@ -580,14 +582,30 @@ function legend(label,x,y){box(.3,.17,.018,plateWhite,x,y,Z0-.009,cab);
 const clickables=[],pilot=[];
 function clickable(meshes,data){const d={visual:()=>{},...data};for(const m of meshes){m.userData=d;clickables.push(m);}return d;}
 // 22 mm pilot lamp: black bezel, ribbed domed lens that glows when the output is on.
-function lamp(x,y,label,color,glow,buzzer=false){legend(label,x,y+.235);
+function lamp(x,y,label,color,glow){legend(label,x,y+.235);
  cyl(.15,.05,bezelBlack,x,y,Z0-.025,'z',cab);
  const lm=new T.MeshPhysicalMaterial({color,emissive:new T.Color(glow),emissiveIntensity:.05,roughness:.18,clearcoat:1,clearcoatRoughness:.1});
  cyl(.118,.04,lm,x,y,Z0-.065,'z',cab);
  const dome=new T.Mesh(new T.SphereGeometry(.13,40,16,0,Math.PI*2,0,Math.PI*.3),lm);dome.rotation.x=-Math.PI/2;dome.position.set(x,y,Z0-.085+.13*Math.cos(Math.PI*.3));cab.add(dome);
  for(let r=.03;r<.11;r+=.022){const o=new T.Mesh(new T.TorusGeometry(r,.0025,4,40),lm);o.position.set(x,y,Z0-.085-Math.sqrt(Math.max(0,.13*.13-r*r))+.13*Math.cos(Math.PI*.3)-.002);cab.add(o);}
- if(buzzer)for(const s of [-1,1])for(const r of [.035,.06]){const a=new T.Mesh(new T.TorusGeometry(r,.006,4,16,Math.PI*.6),bezelBlack);a.rotation.z=s>0?-Math.PI*.3:Math.PI*.7;a.position.set(x,y,Z0-.128);cab.add(a);}
  pilot.push(dome);return dome;}
+// 22 mm LED buzzer (AD16-22SM style): ribbed black body, thick red translucent lens with a raised rim,
+// flat face printed with white sound-wave arcs, a centre dot and the sound holes around the edge.
+function buzzer(x,y,label){legend(label,x,y+.235);
+ cyl(.15,.03,bezelBlack,x,y,Z0-.015,'z',cab);                                   // panel nut
+ cyl(.128,.035,bezelBlack,x,y,Z0-.045,'z',cab);                                 // black body behind the lens
+ for(let i=0;i<16;i++){const a=i/16*Math.PI*2;const rib=box(.012,.02,.03,bezelBlack,x+Math.cos(a)*.132,y+Math.sin(a)*.132,Z0-.045,cab);rib.rotation.z=a;}
+ const lm=new T.MeshPhysicalMaterial({color:'#b3121f',emissive:new T.Color('#ff2b2b'),emissiveIntensity:.05,roughness:.22,clearcoat:1,clearcoatRoughness:.08,transmission:.15,thickness:.05});
+ const lens=cyl(.142,.075,lm,x,y,Z0-.1,'z',cab,.138);                            // red lens, slight taper
+ const rim=new T.Mesh(new T.TorusGeometry(.124,.014,10,48),lm);rim.position.set(x,y,Z0-.137);cab.add(rim);
+ decal(.25,.25,512,512,(g,w)=>{const c=w/2;
+  g.fillStyle='#4a0a10';for(const a of [-35,0,35,145,180,215]){const t=a*Math.PI/180;g.beginPath();g.arc(c+Math.cos(t)*200,c-Math.sin(t)*200,17,0,Math.PI*2);g.fill();}
+  g.strokeStyle='#f6f2ee';g.lineCap='round';g.lineWidth=19;
+  for(const base of [-25,155])for(const r of [66,112,158]){const t=base*Math.PI/180;g.beginPath();g.arc(c,c,r,t-.62,t+.62);g.stroke();}
+  g.fillStyle='#f6f2ee';g.beginPath();g.arc(c,c,30,0,Math.PI*2);g.fill();
+  g.fillStyle='#8e101b';g.beginPath();g.arc(c,c,12,0,Math.PI*2);g.fill();
+ },x,y,Z0-.139);
+ pilot.push(lens);return lens;}
 // Flush pushbutton (optionally illuminated): black bezel, coloured cap that moves in when pressed.
 function pushButton(x,y,label,capColor,action,sig,lit=null){legend(label,x,y+.235);
  cyl(.125,.06,bezelBlack,x,y,Z0-.03,'z',cab);
@@ -616,7 +634,7 @@ const holePlug=(x,y)=>{cyl(.085,.03,bezelBlack,x,y,Z0-.015,'z',cab);cyl(.06,.02,
 // Row positions taken from the photo (top plug, 3 lamp rows, 2 input rows, E-stop).
 holePlug(0,5.3);
 lamp(-.57,4.55,'OUTPUT 0','#1f9b4b','#35ff7a');lamp(0,4.55,'OUTPUT 1','#1f9b4b','#35ff7a');lamp(.55,4.55,'OUTPUT 2','#1f9b4b','#35ff7a');
-lamp(-.57,3.86,'OUTPUT 3','#5e0f18','#ff2d2d');lamp(0,3.86,'OUTPUT 4','#5e0f18','#ff2d2d');lamp(.55,3.86,'OUTPUT 5','#9c1420','#ff3a3a',true);
+lamp(-.57,3.86,'OUTPUT 3','#5e0f18','#ff2d2d');lamp(0,3.86,'OUTPUT 4','#5e0f18','#ff2d2d');buzzer(.55,3.86,'OUTPUT 5');
 pushButton(-.54,3.26,'MASTER ON','#1f9b4b','start','masterOn');
 pushButton(0,3.26,'CONTROL\nPOWER ON','#f2b400','start','controlPower','#ffb000');
 lamp(.52,3.27,'CONTROL ON','#c9ced6','#ffffff');
@@ -679,7 +697,7 @@ function setFloor(hex){floorMesh.material.color.set(hex);
 {let saved=null;try{saved=localStorage.getItem('induvara-floor');}catch(e){}setFloor(/^#[0-9a-f]{6}$/i.test(saved||'')?saved:'#8f9b95');
  document.querySelectorAll('[data-floor]').forEach(b=>b.onclick=()=>setFloor(b.dataset.floor));$('floor-pick').oninput=e=>setFloor(e.target.value);}
 const tags=[];function tag(s,pos){const el=document.createElement('div');el.className='tag';el.textContent=s;$('labels-layer').appendChild(el);tags.push({el,pos:new T.Vector3(...pos)});}
-tag('FEED MAGAZINE',[0,5.4,-.1]);sensorPositions.forEach(sensor=>tag(sensor.id.toUpperCase(),[sensor.x,2.9,sensor.z]));tag('CC-Link IE · REMOTE I/O',[3.5,2.1,3]);tag('FX5U · CONTROL CABINET',[8.65,6.2,2.2]);tag('CHUTE A',[-2.1,1.3,-4.1]);tag('CHUTE B',[3,1.3,-4.1]);
+tag('FEED MAGAZINE',[0,5.4,-.1]);sensorPositions.forEach(sensor=>tag(sensor.id.toUpperCase(),[sensor.x,2.9,sensor.z]));tag('CC-Link IE · REMOTE I/O',[3.5,2.1,3]);tag('FX5U · CONTROL CABINET',[8.65,6.2,2.2]);tag('CHUTE A',[CHUTE_A_X,1.3,-4.1]);tag('CHUTE B',[CHUTE_B_X,1.3,-4.1]);
 const chuteSlots={yellow:[],metal:[]}, chuteCapacity=3;
 const partOuterRadius=.36+.018, chutePartGap=0;
 function nextChuteSlot(type){return -1.55+partOuterRadius+chuteSlots[type].length*(2*partOuterRadius+chutePartGap);}
@@ -687,18 +705,34 @@ function nextChuteSlot(type){return -1.55+partOuterRadius+chuteSlots[type].lengt
 const partYellow=new T.MeshStandardMaterial({color:'#f29d00',roughness:.55,metalness:0,envMapIntensity:.55});
 const partMat={yellow:partYellow,black:rubber,metal:steel};function puck(type){const shape=new T.Shape();shape.absarc(0,0,.36,0,Math.PI*2,false);const h=new T.Path();h.absarc(0,0,.065,0,Math.PI*2,true);shape.holes.push(h);const mesh=new T.Mesh(new T.ExtrudeGeometry(shape,{depth:.3,bevelEnabled:true,bevelSize:.018,bevelSegments:2,bevelThickness:.015,steps:1,curveSegments:32}),partMat[type]);mesh.rotation.x=-Math.PI/2;mesh.castShadow=true;mesh.receiveShadow=true;machine.add(mesh);return mesh;}
 let queue=[],active=null,run=false,emergency=false,phase=0,elapsed=0,counts={yellow:0,black:0,metal:0},finished=[];const stack=[];
-function updateStock(){for(const p of stack)machine.remove(p);stack.length=0;queue.slice(0,9).forEach((t,i)=>{let p=puck(t);p.position.set(0,partRestY+i*(partDepth+2*partBevel),-.15);stack.push(p);});$('stock').textContent=queue.length;}
-function fill(){queue.push('yellow','black','metal','yellow','metal','black','yellow','black','metal');updateStock();}
+function updateStock(){for(const p of stack)machine.remove(p);stack.length=0;queue.slice(0,MAG_MAX).forEach((t,i)=>{let p=puck(t);p.position.set(0,partRestY+i*(partDepth+2*partBevel),-.15);stack.push(p);});$('stock').textContent=queue.length;renderMag();}
+// Magazine loadout: the parts (bottom first) the user set up. Reset reloads it; a run only uses up the queue.
+const MAG_MAX=9,MAG_KEY='induvara-magazine-v1',MAG_DEFAULT=['yellow','black','metal','yellow','metal','black','yellow','black','metal'],PART_NAME={yellow:'เหลือง',black:'ดำ',metal:'อะลูมิเนียม'};
+let loadout=MAG_DEFAULT.slice();try{const s=JSON.parse(localStorage.getItem(MAG_KEY));if(Array.isArray(s)&&s.every(t=>t in PART_NAME))loadout=s.slice(0,MAG_MAX);}catch{}
+function setMag(list){queue=list.slice(0,MAG_MAX);loadout=queue.slice();saveMag();updateStock();}
+function saveMag(){try{localStorage.setItem(MAG_KEY,JSON.stringify(loadout));}catch{}}
+// The list shows the fixed loadout; parts already fed are greyed out instead of the rows shifting up.
+// Invariant: queue = the not-yet-fed tail of loadout.
+const fedCount=()=>Math.max(0,loadout.length-queue.length);
+function editMag(fn){const fed=fedCount();loadout=fn(loadout.slice()).slice(0,MAG_MAX);queue=loadout.slice(Math.min(fed,loadout.length));saveMag();updateStock();}
+function fill(){queue=loadout.slice();updateStock();}
+function renderMag(){const el=$('mag-list');if(!el)return;const fed=fedCount();el.innerHTML=loadout.map((t,i)=>{const done=i<fed,next=i===fed;return '<div class="mag-row'+(done?' done':'')+(next?' next':'')+'"><span class="mag-n">'+(i+1)+'</span><b class="dot '+t+'"></b><select data-slot="'+i+'" aria-label="ชิ้นที่ '+(i+1)+'"'+(done?' disabled':'')+'>'+Object.keys(PART_NAME).map(k=>'<option value="'+k+'"'+(k===t?' selected':'')+'>'+PART_NAME[k]+'</option>').join('')+'</select><span class="mag-tag">'+(done?'ป้อนแล้ว':next?'ถัดไป':'')+'</span><button type="button" class="mag-del" data-del="'+i+'" aria-label="เอาชิ้นที่ '+(i+1)+' ออก" title="เอาออก"'+(done?' disabled':'')+'>×</button></div>';}).join('')+(loadout.length<MAG_MAX?'<button type="button" class="mag-add" data-add>+ เพิ่มชิ้นที่ '+(loadout.length+1)+'</button>':'<p>เต็มแล้ว ('+MAG_MAX+' ชิ้น)</p>');}
 function state(s,step){$('state').textContent=s;$('step').textContent=step;}
 function act(a){if(plcMode&&a!=='reset'){const P=window.twinPLC;if(a==='start'){if(emergency){state('ปลด Emergency ด้วยปุ่ม Reset ก่อน','EMERGENCY LATCHED');return;}P.pulse('masterOn');}if(a==='stop')P.pulse('pbIn0');if(a==='estop'){Sfx.alarm();emergency=true;state('หยุดฉุกเฉิน · Input E-stop = 0 · กด Reset เพื่อปลด','EMERGENCY STOP');$('estop').style.background='#f3d2cb';}return;}
 if(a==='start'){if(emergency){state('ปลด Emergency ด้วยปุ่ม Reset ก่อน','EMERGENCY LATCHED');return;}run=true;state('กำลังทำงาน','AUTOMATIC CYCLE');}if(a==='stop'){run=false;state('หยุดชั่วคราว','CYCLE PAUSED');}if(a==='estop'){Sfx.alarm();run=false;emergency=true;state('หยุดฉุกเฉิน · กด Reset เพื่อปลด','EMERGENCY STOP');$('estop').style.background='#f3d2cb';}if(a==='reset'){run=false;emergency=false;phase=0;elapsed=0;if(active)machine.remove(active.mesh);active=null;for(const p of finished)machine.remove(p);finished=[];chuteSlots.yellow.length=0;chuteSlots.metal.length=0;queue=[];counts={yellow:0,black:0,metal:0};for(const a of actuators)a.position.z=0;clearPlcParts();fill();$('estop').style.background='';state(plcMode?'ควบคุมโดย PLC · กดเริ่มทำงาน (X0) เพื่อสั่ง Auto':'พร้อมทำงาน',plcMode?'PLC ONLINE':'SYSTEM READY');}}
-for(let a of ['start','stop','estop','reset'])$(a).onclick=()=>act(a);$('refill').onclick=fill;document.querySelectorAll('[data-part]').forEach(b=>b.onclick=()=>{queue.push(b.dataset.part);updateStock();});fill();
+for(let a of ['start','stop','estop','reset'])$(a).onclick=()=>act(a);$('mag-list').onclick=e=>{const b=e.target.closest('button');if(!b||b.disabled)return;if(b.dataset.del!==undefined)editMag(l=>l.filter((_,i)=>i!==+b.dataset.del));else if(b.hasAttribute('data-add'))editMag(l=>[...l,'yellow']);};$('mag-list').onchange=e=>{const s=e.target.closest('select[data-slot]');if(s)editMag(l=>{l[+s.dataset.slot]=s.value;return l;});};$('mag-default').onclick=()=>setMag(MAG_DEFAULT);$('mag-random').onclick=()=>setMag(Array.from({length:MAG_MAX},()=>['yellow','black','metal'][Math.floor(Math.random()*3)]));$('mag-clear').onclick=()=>setMag([]);fill();
 const ray=new T.Raycaster(),mouse=new T.Vector2();let down=null;let heldSig=null;function pickClickable(e){let r=renderer.domElement.getBoundingClientRect();mouse.set((e.clientX-r.left)/r.width*2-1,-(e.clientY-r.top)/r.height*2+1);ray.setFromCamera(mouse,camera);const hit=ray.intersectObjects(clickables);return hit.length?hit[0].object:null;}
+// Click the magazine tube (or the toolbar button) to see through it, e.g. from the back view.
+mg.userData={kind:'magazine'};clickables.push(mg);const magGhostBtn=$('mag-ghost');
+function setMagGhost(on){mg.material.transparent=on;mg.material.opacity=on?.16:1;mg.material.depthWrite=!on;mg.castShadow=!on;mg.material.needsUpdate=true;if(magGhostBtn){magGhostBtn.classList.toggle('on',on);magGhostBtn.setAttribute('aria-pressed',String(on));}}
+if(magGhostBtn)magGhostBtn.onclick=()=>setMagGhost(!mg.material.transparent);
 let held=null;renderer.domElement.addEventListener('pointerdown',e=>{down=[e.clientX,e.clientY];const o=pickClickable(e);if(!o)return;Sfx.click();const d=o.userData;if(d.kind==='selector'){d.on=!d.on;d.visual(d.on);if(plcMode&&d.sig)window.twinPLC.press(d.sig,d.on);return;}if(d.kind!=='push')return;held=d;d.visual(true);orbit.enabled=false;if(plcMode&&d.sig){heldSig=d.sig;window.twinPLC.press(d.sig,true);}});
 const releaseHeld=()=>{if(held){held.visual(false);held=null;orbit.enabled=true;}if(!heldSig)return;window.twinPLC.press(heldSig,false);heldSig=null;};
-window.addEventListener('pointerup',releaseHeld);window.addEventListener('blur',releaseHeld);renderer.domElement.addEventListener('pointerup',e=>{if(!down||Math.hypot(e.clientX-down[0],e.clientY-down[1])>5)return;let r=renderer.domElement.getBoundingClientRect();mouse.set((e.clientX-r.left)/r.width*2-1,-(e.clientY-r.top)/r.height*2+1);ray.setFromCamera(mouse,camera);const hit=ray.intersectObjects(clickables);if(hit.length){const d=hit[0].object.userData;if(d.kind==='selector'||(plcMode&&d.sig)||!d.action)return;act(d.action);}});
-const views={all:[[-13,15.2,-13.3],[-2.4,1,.9]],station:[[0,15,-19],[0,1.3,0]],cabinet:[[-12,7,-9],[-8.65,3,2.2]],top:[[0,23,-.21],[0,.8,-.2]]};let camTween=null;const spinBtn=$('spin');orbit.autoRotateSpeed=-1.1;function setSpin(on){orbit.autoRotate=on;spinBtn.classList.toggle('on',on);spinBtn.setAttribute('aria-pressed',String(on));spinBtn.querySelector('span').textContent=on?'หยุดหมุน':'หมุนอัตโนมัติ';}
+window.addEventListener('pointerup',releaseHeld);window.addEventListener('blur',releaseHeld);renderer.domElement.addEventListener('pointerup',e=>{if(!down||Math.hypot(e.clientX-down[0],e.clientY-down[1])>5)return;let r=renderer.domElement.getBoundingClientRect();mouse.set((e.clientX-r.left)/r.width*2-1,-(e.clientY-r.top)/r.height*2+1);ray.setFromCamera(mouse,camera);const hit=ray.intersectObjects(clickables);if(hit.length){const d=hit[0].object.userData;if(d.kind==='magazine'){setMagGhost(!mg.material.transparent);return;}if(d.kind==='selector'||(plcMode&&d.sig)||!d.action)return;act(d.action);}});
+const views={all:[[-13,15.2,-13.3],[-2.4,1,.9]],station:[[0,15,-19],[0,1.3,0]],back:[[0,15,19],[0,1.3,0]],cabinet:[[-12,7,-9],[-8.65,3,2.2]],top:[[0,23,-.21],[0,.8,-.2]]};let camTween=null;const spinBtn=$('spin');orbit.autoRotateSpeed=-1.1;function setSpin(on){orbit.autoRotate=on;spinBtn.classList.toggle('on',on);spinBtn.setAttribute('aria-pressed',String(on));spinBtn.querySelector('span').textContent=on?'หยุดหมุน':'หมุนอัตโนมัติ';}
 spinBtn.onclick=()=>{camTween=null;setSpin(!orbit.autoRotate);};
+// Collapsible view toolbar: collapsed it shows only a toggle with the current view's name.
+{const vb=document.querySelector('.viewbar'),tg=$('viewbar-toggle'),lbl=tg&&tg.querySelector('.vb-label');const setVB=c=>{vb.classList.toggle('collapsed',c);tg.setAttribute('aria-expanded',String(!c));tg.title=c?'ขยายแถบเครื่องมือ':'ยุบแถบเครื่องมือ';const a=document.querySelector('[data-view].active');lbl.textContent=c?(a?a.textContent:'มุมมอง'):'';try{localStorage.setItem('induvara-viewbar-collapsed',c?'1':'0');}catch{}};if(tg){tg.onclick=()=>setVB(!vb.classList.contains('collapsed'));let c=false;try{c=localStorage.getItem('induvara-viewbar-collapsed')==='1';}catch{}setVB(c);}}
 document.querySelectorAll('[data-view]').forEach(b=>b.onclick=()=>{setSpin(false);document.querySelectorAll('[data-view]').forEach(n=>n.classList.toggle('active',n===b));const v=views[b.dataset.view];camTween={from:camera.position.clone(),targetFrom:orbit.target.clone(),to:new T.Vector3(...v[0]),target:new T.Vector3(...v[1]),t:0};});
 // Shift the picture left only while the side panel covers the right edge; centred when it is collapsed.
 function resize(){const w=vp.clientWidth,h=vp.clientHeight;renderer.setSize(w,h);camera.aspect=w/h;const panelOpen=!$('control-panel').hidden;if(w>760&&panelOpen)camera.setViewOffset(w,h,140,0,w,h);else camera.clearViewOffset();camera.updateProjectionMatrix();}window.addEventListener('resize',resize);resize();
@@ -707,24 +741,29 @@ function sensors(values){sensorOrder.forEach(id=>{const v=!!values[id];$('s-'+id
 // ---------- PLC-driven physics: Y outputs move the machine, the machine produces X inputs ----------
 let plcMode=false;
 const plc={ext:[0,0,0],parts:[],feedArmed:true};
-const pushX=[-2.1,3], chuteKey=['yellow','metal'], BELT_SPEED=1.75;
+const pushX=[CHUTE_A_X,CHUTE_B_X], chuteKey=['yellow','metal'], BELT_SPEED=1.75;
 function clearPlcParts(){for(const p of plc.parts)machine.remove(p.mesh);plc.parts=[];plc.ext=[0,0,0];plc.feedArmed=true;for(const b of bodies)machine.remove(b.mesh);bodies.length=0;restingParts.length=0;}
 function placeOnChute(mesh,slotZ,v){const stopZ=chuteCenterZ+slotZ*Math.cos(chuteAngle)+(.045/2+partBevel)*Math.sin(chuteAngle);mesh.position.z=T.MathUtils.lerp(-1.75,stopZ,v);const entryZ=chuteCenterZ+.8*Math.cos(chuteAngle);const onChute=mesh.position.z<=entryZ;const surfaceY=chuteCenterY-Math.tan(chuteAngle)*(mesh.position.z-chuteCenterZ)+(.045/2+partBevel)/Math.cos(chuteAngle);mesh.position.y=onChute?surfaceY:T.MathUtils.lerp(partRestY,chuteCenterY-.8*Math.sin(chuteAngle)+(.045/2+partBevel)/Math.cos(chuteAngle),(-1.75-mesh.position.z)/(-1.75-entryZ));mesh.rotation.x=-Math.PI/2+(onChute?chuteAngle:0);}
 function toChute(p,i){placeOnChute(p.mesh,p.slotZ,1);p.state='chute';chuteSlots[chuteKey[i]].push(p.mesh);counts[chuteKey[i]]++;finished.push(p.mesh);}
 function plcStep(dt){
  const P=window.twinPLC,O=s=>P.output(s);
  const motor=O('motor'),rev=O('motorRev');
- // Cylinders: single solenoid, spring return. Feed stroke 0.9 s, sort pushers 0.42 s.
- const want=[O('solA'),O('solB'),O('solFeed')],rate=[1/.42,1/.42,1/.9];
+ // Cylinders: single solenoid, spring return. Stroke times (default feed 0.9 s, sort pushers 0.42 s)
+ // and belt speed are adjustable in the PLC dialog (twinPLC.motion).
+ const M=P.motion||{feed:.9,sort:.42,belt:1};
+ // Cylinder A is the right-hand pusher (chute B side, actuators[1]); cylinder B is the left one (actuators[0]).
+ const want=[O('solB'),O('solA'),O('solFeed')],rate=[1/M.sort,1/M.sort,1/M.feed];
  for(let i=0;i<3;i++){const d=(want[i]?1:0)-plc.ext[i];plc.ext[i]+=Math.sign(d)*Math.min(Math.abs(d),rate[i]*dt);}
  actuators[0].position.z=-plc.ext[0]*1.15;actuators[1].position.z=-plc.ext[1]*1.15;actuators[2].position.z=-plc.ext[2]*FEED_STROKE;
  // Feed: the bottom part drops in front of the pusher only while it is retracted.
  if(plc.ext[2]<.04)plc.feedArmed=true;
  let feeding=plc.parts.find(p=>p.state==='feed');
  if(!feeding&&plc.feedArmed&&plc.ext[2]>.04&&queue.length){const type=queue.shift();feeding={type,mesh:puck(type),state:'feed',f:0,x:0,push:0};plc.parts.push(feeding);plc.feedArmed=false;updateStock();}
- if(feeding){feeding.f=Math.max(feeding.f,plc.ext[2]);feeding.mesh.position.set(0,partRestY,feedPartZ(feeding.f));if(feeding.f>=.995){feeding.state='belt';feeding.x=0;}}
- // Conveyor: Y motor runs it, Y motorRev reverses it (toward chute A).
- const v=motor?(rev?-BELT_SPEED:BELT_SPEED):0;
+ if(feeding){feeding.f=Math.max(feeding.f,plc.ext[2]);feeding.mesh.position.set(0,partRestY,feedPartZ(feeding.f));if(feeding.f>=.995||(feeding.f>=.9&&plc.ext[2]<feeding.f-.02)){feeding.state='belt';feeding.x=0;feeding.mesh.position.set(0,partRestY,-1.75);}} // pushed (almost) all the way, then retracted: the part is on the belt
+ // Conveyor: MOTOR_CONV (forward) runs the belt toward chute A / motor end, MOTOR_REV the other way
+ // (toward chute B / far end), to match the real station's motor wiring.
+ // Either wiring works: REV alone (separate FWD/REV contactors) or CONV + REV together.
+ const bs=BELT_SPEED*M.belt,v=rev?bs:motor?-bs:0;
  beltMove(v,dt);
  for(const p of plc.parts){
   if(p.state==='belt'){p.x+=v*dt;p.mesh.position.set(p.x,partRestY,-1.75);p.mesh.rotation.x=-Math.PI/2;if(Math.abs(p.x)>5.55){p.state='done';startDrop(p.mesh,v);counts.black++;finished.push(p.mesh);if(finished.length>24)machine.remove(finished.shift());}}
@@ -747,18 +786,19 @@ function plcStep(dt){
  // Sensors from part positions (simulate) or straight from the PLC's X (monitor).
  const phys={photo:false,cap:false,ind:false},nearby=[];let seen=null;
  for(const p of plc.parts){if(p.state==='fall')continue;for(const sensor of sensorPositions)if(sensorOverlap(p.mesh.position,sensor)){phys[sensor.id]=phys[sensor.id]||materialSignals[p.type][sensor.id];if(!nearby.includes(sensor.id.toUpperCase()))nearby.push(sensor.id.toUpperCase());seen=p;}}
- const monitor=P.access==='read';
- const shown=monitor?{photo:P.input('photo'),cap:P.input('cap'),ind:P.input('ind')}:phys;
+ // 'read' (monitor) and 'buttons' (real sensors, web buttons): sensors shown from the PLC's X.
+ const monitor=P.access==='read',fromPlc=P.access!=='readwrite';
+ const shown=fromPlc?{photo:P.input('photo'),cap:P.input('cap'),ind:P.input('ind')}:phys;
  sensors(shown);
  const ex=plc.ext;
- const inputs={...phys,feedRet:ex[2]<.03,feedExt:ex[2]>.97,aRet:ex[0]<.03,aExt:ex[0]>.97,bRet:ex[1]<.03,bExt:ex[1]>.97,magEmpty:queue.length===0,estopOk:!emergency,masterOn:false,controlPower:false};
+ const inputs={...phys,feedRet:ex[2]<.03,feedExt:ex[2]>.97,aRet:ex[1]<.03,aExt:ex[1]>.97,bRet:ex[0]<.03,bExt:ex[0]>.97,magEmpty:queue.length===0,estopOk:!emergency,masterOn:false,controlPower:false};
  P.setInputs(inputs);
  // Lamps follow the PLC outputs.
  pilot.forEach((l,i)=>{l.material.emissiveIntensity=(i<6?O('lamp'+i):O('controlOn'))?1.5:.03;});
- $('sensor-material').textContent=monitor?'Monitor: เซนเซอร์แสดงค่า X จาก PLC':(nearby.length&&seen?'ผ่าน '+nearby.join(' / ')+' · '+materialSignals[seen.type].name:'รอชิ้นงานผ่านเซนเซอร์');
+ $('sensor-material').textContent=fromPlc?(monitor?'Monitor: ':'')+'เซนเซอร์แสดงค่า X จาก PLC':(nearby.length&&seen?'ผ่าน '+nearby.join(' / ')+' · '+materialSignals[seen.type].name:'รอชิ้นงานผ่านเซนเซอร์');
  Object.keys(counts).forEach(k=>$('c-'+k).textContent=counts[k]);
- if(!emergency){const parts=[motor?(rev?'สายพานถอยหลัง':'สายพานเดินหน้า'):'สายพานหยุด'];if(want[2])parts.push('ป้อนชิ้นงาน');if(want[0])parts.push('ดันราง A');if(want[1])parts.push('ดันราง B');state('ควบคุมโดย PLC · '+parts.join(' · '),'PLC '+(O('lamp0')?'RUN':'ONLINE')+(monitor?' · MONITOR':''));}
- window.twinIO={...inputs,...(monitor?shown:{}),motor,motorRev:rev,solFeed:want[2],solA:want[0],solB:want[1],controlOn:O('controlOn'),...Object.fromEntries([0,1,2,3,4,5].map(i=>['lamp'+i,O('lamp'+i)]))};
+ if(!emergency){const parts=[motor?(rev?'สายพานถอยหลัง':'สายพานเดินหน้า'):'สายพานหยุด'];if(want[2])parts.push('ป้อนชิ้นงาน');if(want[0])parts.push('ดันราง A');if(want[1])parts.push('ดันราง B');state('ควบคุมโดย PLC · '+parts.join(' · '),'PLC '+(O('lamp0')?'RUN':'ONLINE')+(monitor?' · MONITOR':fromPlc?' · SENSOR จาก PLC':''));}
+ window.twinIO={...inputs,...(fromPlc?shown:{}),motor,motorRev:rev,solFeed:want[2],solA:want[1],solB:want[0],controlOn:O('controlOn'),...Object.fromEntries([0,1,2,3,4,5].map(i=>['lamp'+i,O('lamp'+i)]))};
 }
 
 // ---------- Sound (Web Audio, synthesized — no files). Off by default; toggled from the view bar. ----------
@@ -803,13 +843,13 @@ let prev=performance.now();function loop(now){requestAnimationFrame(loop);soundT
 {const on=!!(window.twinPLC&&window.twinPLC.connected);if(on!==plcMode){plcMode=on;$('speed').disabled=on;act('reset');if(on)for(const o of clickables){const d=o.userData;if(d.kind==='selector'&&d.on&&d.sig)window.twinPLC.press(d.sig,true);}}}
 if(camTween){let c=camTween;c.t=Math.min(1,c.t+raw*1.6);let v=c.t*c.t*(3-2*c.t);camera.position.lerpVectors(c.from,c.to,v);orbit.target.lerpVectors(c.targetFrom,c.target,v);if(c.t===1)camTween=null;}
 if(!plcMode&&run){elapsed+=dt;if(!active){if(queue.length && queue[0]!=='black' && chuteSlots[queue[0]].length>=chuteCapacity){run=false;state('ราง '+(queue[0]==='yellow'?'A':'B')+' เต็ม 3 ชิ้น · กด Reset เพื่อเริ่มใหม่','CHUTE FULL');}else if(queue.length){const type=queue.shift();active={type,mesh:puck(type),x:0,slotZ:type==='black'?null:nextChuteSlot(type)};active.mesh.position.set(0,partRestY,-.15);phase=0;elapsed=0;updateStock();state('ป้อนชิ้นงานจากแมกกาซีน','01 · FEEDING');}else {run=false;state('ชิ้นงานหมด · เติมเพื่อเริ่มรอบใหม่','MAGAZINE EMPTY');}}
-if(active){let p=active.mesh,t=active.type;if(phase===0){let v=Math.min(elapsed/.9,1);actuators[2].position.z=-v*FEED_STROKE;p.position.z=feedPartZ(v);if(v===1){phase=1;elapsed=0;state('ตรวจสอบชิ้นงาน','02 · SENSOR DETECTION');}}else if(phase===1){actuators[2].position.z=Math.min(0,actuators[2].position.z+dt*2);if(elapsed>.75){phase=2;elapsed=0;state('ลำเลียงไปยังช่องรับ','03 · CONVEYING');}}else if(phase===2){let dir=t==='yellow'?-1:1;active.x+=dir*dt*1.75;beltMove(dir*1.75,dt);p.position.x=active.x;const target=t==='black'?5.55:(t==='yellow'?2.1:3);if(Math.abs(active.x)>=target){phase=3;elapsed=0;state(t==='black'?'ส่งออกปลายสายพาน':'กระบอกลมคัดแยกชิ้นงาน','04 · SORTING');}}else if(phase===3){let v=Math.min(elapsed/.85,1);if(t==='black'){beltMove(1.75,dt);if(!active.dropped){active.dropped=true;startDrop(p,1.75);}}else{const idx=t==='yellow'?0:1;const e=Math.sin(v*Math.PI);actuators[idx].position.z=-e*SORT_STROKE;p.position.x=t==='yellow'?-2.1:3;const stopZ=chuteStopZ(active.slotZ);if(active.zp===undefined)active.zp=-1.75;active.zp=pushPart(active.zp,e,stopZ,dt);if(v===1)active.zp=stopZ;posePart(p,active.zp);}if(v===1){counts[t]++;if(t!=='black')chuteSlots[t].push(p);finished.push(p);if(finished.length>18)machine.remove(finished.shift());active=null;elapsed=0;for(const a of actuators)a.position.z=0;}}}}
+if(active){let p=active.mesh,t=active.type;if(phase===0){let v=Math.min(elapsed/.9,1);actuators[2].position.z=-v*FEED_STROKE;p.position.z=feedPartZ(v);if(v===1){phase=1;elapsed=0;state('ตรวจสอบชิ้นงาน','02 · SENSOR DETECTION');}}else if(phase===1){actuators[2].position.z=Math.min(0,actuators[2].position.z+dt*2);if(elapsed>.75){phase=2;elapsed=0;state('ลำเลียงไปยังช่องรับ','03 · CONVEYING');}}else if(phase===2){let dir=t==='yellow'?-1:1;active.x+=dir*dt*1.75;beltMove(dir*1.75,dt);p.position.x=active.x;const target=t==='black'?5.55:(t==='yellow'?-CHUTE_A_X:CHUTE_B_X);if(Math.abs(active.x)>=target){phase=3;elapsed=0;state(t==='black'?'ส่งออกปลายสายพาน':'กระบอกลมคัดแยกชิ้นงาน','04 · SORTING');}}else if(phase===3){let v=Math.min(elapsed/.85,1);if(t==='black'){beltMove(1.75,dt);if(!active.dropped){active.dropped=true;startDrop(p,1.75);}}else{const idx=t==='yellow'?0:1;const e=Math.sin(v*Math.PI);actuators[idx].position.z=-e*SORT_STROKE;p.position.x=t==='yellow'?CHUTE_A_X:CHUTE_B_X;const stopZ=chuteStopZ(active.slotZ);if(active.zp===undefined)active.zp=-1.75;active.zp=pushPart(active.zp,e,stopZ,dt);if(v===1)active.zp=stopZ;posePart(p,active.zp);}if(v===1){counts[t]++;if(t!=='black')chuteSlots[t].push(p);finished.push(p);if(finished.length>18)machine.remove(finished.shift());active=null;elapsed=0;for(const a of actuators)a.position.z=0;}}}}
 updateDrops(plcMode?raw:dt);if(plcMode)plcStep(raw);else{const signal=active?materialSignals[active.type]:null;
 const readings={photo:false,cap:false,ind:false};const nearby=[];
 for(const sensor of sensorPositions){if(active&&sensorOverlap(active.mesh.position,sensor)){nearby.push(sensor.id.toUpperCase());readings[sensor.id]=signal[sensor.id];}}
 sensors(readings);
 $('sensor-material').textContent=nearby.length?'ผ่าน '+nearby.join(' / ')+' · '+signal.name:'รอชิ้นงานผ่านเซนเซอร์';Object.keys(counts).forEach(k=>$('c-'+k).textContent=counts[k]);pilot.forEach((p,i)=>{p.material.emissiveIntensity=i===6?(emergency?0:1):((i===0&&run)||(i===1&&phase===0&&run)||(i===2&&phase===3&&run)||(i===3&&!run)||(i>=4&&emergency)?1.5:.03);});
 // Publish simulated signal states for the I/O table (io.js).
-{const z=i=>actuators[i].position.z,lit=i=>pilot[i]&&pilot[i].material.emissiveIntensity>.5;window.twinIO={...readings,masterOn:false,controlPower:false,estopOk:!emergency,lamp0:lit(0),lamp1:lit(1),lamp2:lit(2),lamp3:lit(3),lamp4:lit(4),lamp5:lit(5),controlOn:lit(6),feedRet:z(2)>-.05,feedExt:z(2)<-.8,aRet:z(0)>-.05,aExt:z(0)<-1.05,bRet:z(1)>-.05,bExt:z(1)<-1.05,magEmpty:queue.length===0,motor:run,solFeed:!!(run&&active&&phase===0),solA:!!(run&&active&&phase===3&&active.type==='yellow'),solB:!!(run&&active&&phase===3&&active.type==='metal')};}}
+{const z=i=>actuators[i].position.z,lit=i=>pilot[i]&&pilot[i].material.emissiveIntensity>.5;window.twinIO={...readings,masterOn:false,controlPower:false,estopOk:!emergency,lamp0:lit(0),lamp1:lit(1),lamp2:lit(2),lamp3:lit(3),lamp4:lit(4),lamp5:lit(5),controlOn:lit(6),feedRet:z(2)>-.05,feedExt:z(2)<-.8,aRet:z(1)>-.05,aExt:z(1)<-1.05,bRet:z(0)>-.05,bExt:z(0)<-1.05,magEmpty:queue.length===0,motor:run,solFeed:!!(run&&active&&phase===0),solA:!!(run&&active&&phase===3&&active.type==='metal'),solB:!!(run&&active&&phase===3&&active.type==='yellow')};}}
 orbit.update();const w=vp.clientWidth,h=vp.clientHeight;tags.forEach(t=>{const p=machine.localToWorld(t.pos.clone()).project(camera);t.el.style.display=$('labels').checked&&p.z<1&&p.x<.9&&p.x>-.95?'block':'none';t.el.style.left=(p.x*.5+.5)*w+'px';t.el.style.top=(-p.y*.5+.5)*h+'px';});renderer.render(scene,camera);}
 requestAnimationFrame(loop);

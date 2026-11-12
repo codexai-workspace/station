@@ -66,14 +66,19 @@ class MxClient {
 
   // Each MX call costs ~20-30 ms on GX Simulator3, so bits are read 16 at a time
   // with digit notation (K4X0 = X0..X17 on FX5) instead of one call per bit.
-  async readBits(addr, n) {
-    const d = parse(addr, this.xyBase);
-    const devs = [];
-    for (let i = 0; i < n; i += 16) devs.push(`K${Math.ceil(Math.min(16, n - i) / 4)}${name(d.dev, d.num + i, this.xyBase)}`);
+  async readBits(addr, n) { return (await this.readBlocks([{ addr, n }]))[0]; }
+  // Several bit ranges in ONE bridge call; mx_bridge.py reads the whole list with a single
+  // ReadDeviceRandom2, so a poll costs one MX round trip no matter how many blocks it has.
+  async readBlocks(blocks) {
+    const devs = [], spans = [];
+    for (const { addr, n } of blocks) {
+      const d = parse(addr, this.xyBase);
+      spans.push({ at: devs.length, n });
+      for (let i = 0; i < n; i += 16) devs.push(`K${Math.ceil(Math.min(16, n - i) / 4)}${name(d.dev, d.num + i, this.xyBase)}`);
+    }
+    if (!devs.length) return [];
     const words = (await this._call({ op: 'get', devs })).values;
-    const out = [];
-    for (let i = 0; i < n; i++) out.push((words[i >> 4] >> (i & 15)) & 1);
-    return out;
+    return spans.map(({ at, n }) => Array.from({ length: n }, (_, i) => (words[at + (i >> 4)] >> (i & 15)) & 1));
   }
   async readWords(addr, n) { return (await this._call({ op: 'get', devs: this._list(addr, n) })).values.map((v) => (v << 16) >> 16); }
   async writeBits(addr, values) { await this._call({ op: 'set', devs: this._list(addr, values.length), values }); }

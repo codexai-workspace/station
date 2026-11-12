@@ -60,6 +60,90 @@ def unpack(r):
     return 0, r
 
 
+class VtableMx:
+    """Batched access through the COM vtable (ctypes).
+
+    Through IDispatch, pywin32 can only pass a single short for the array argument of
+    ReadDeviceRandom2 / WriteDeviceRandom2, so the old path made one GetDevice2/SetDevice2
+    call per device (~25-30 ms each on GX Simulator3). Calling the dual interface's vtable
+    directly reads or writes any number of devices in one ~25-30 ms call.
+    Offsets come from the object's own type library, so nothing is hard-coded.
+    """
+
+    def __init__(self, disp, progid):
+        import ctypes
+        from ctypes import POINTER, WINFUNCTYPE, HRESULT, byref, c_long, c_short, c_void_p
+        self.ct = ctypes
+        ti = disp._oleobj_.GetTypeInfo()
+        vti = ti.GetRefTypeInfo(ti.GetRefTypeOfImplType(-1))  # dual -> vtable interface
+        off = {}
+        for i in range(vti.GetTypeAttr().cFuncs):
+            f = vti.GetFuncDesc(i)
+            off[(vti.GetNames(f.memid)[0], f.invkind)] = f.oVft
+        # Our own instance of the same class, held as a raw interface pointer.
+        import pywintypes
+        clsid = str(pywintypes.IID(progid))
+        iid = str(vti.GetTypeAttr().iid)
+        self.p = c_void_p()
+        ole32 = ctypes.oledll.ole32
+
+        class GUID(ctypes.Structure):
+            _fields_ = [("b", ctypes.c_byte * 16)]
+
+        def guid(s):
+            g = GUID()
+            ole32.CLSIDFromString(ctypes.c_wchar_p(s), byref(g))
+            return g
+        ole32.CoCreateInstance(byref(guid(clsid)), None, 1 | 4, byref(guid(iid)), byref(self.p))
+        vt = ctypes.cast(ctypes.cast(self.p, POINTER(c_void_p))[0], POINTER(c_void_p))
+        ptr = ctypes.sizeof(c_void_p)
+
+        def method(name, kind, *argt):
+            return WINFUNCTYPE(HRESULT, c_void_p, *argt)(vt[off[(name, kind)] // ptr])
+        self._put_station = method("ActLogicalStationNumber", 4, c_long)
+        self._open = method("Open", 1, POINTER(c_long))
+        self._close = method("Close", 1, POINTER(c_long))
+        self._read = method("ReadDeviceRandom2", 1, c_void_p, c_long, POINTER(c_short), POINTER(c_long))
+        self._write = method("WriteDeviceRandom2", 1, c_void_p, c_long, POINTER(c_short), POINTER(c_long))
+        oa = ctypes.oledll.oleaut32
+        oa.SysAllocString.restype = c_void_p
+        oa.SysFreeString.argtypes = [c_void_p]
+        self._alloc, self._free = oa.SysAllocString, oa.SysFreeString
+        self.c_long, self.c_short, self.byref = c_long, c_short, byref
+
+    def _rc(self, fn, *args):
+        rc = self.c_long()
+        fn(self.p, *args, self.byref(rc))
+        return rc.value
+
+    def open(self, station):
+        self._put_station(self.p, station)
+        return self._rc(self._open)
+
+    def close(self):
+        self._rc(self._close)
+
+    def _call(self, fn, devs, buf):
+        b = self._alloc(self.ct.c_wchar_p("\n".join(devs)))
+        try:
+            return self._rc(fn, b, len(devs), buf)
+        finally:
+            self._free(b)
+
+    def get(self, devs):
+        buf = (self.c_short * len(devs))()
+        ret = self._call(self._read, devs, buf)
+        if ret != 0:
+            raise RuntimeError(f"ReadDeviceRandom2 0x{ret & 0xFFFFFFFF:08X}")
+        return [int(v) for v in buf]
+
+    def set(self, devs, values):
+        buf = (self.c_short * len(devs))(*[int(v) for v in values])
+        ret = self._call(self._write, devs, buf)
+        if ret != 0:
+            raise RuntimeError(f"WriteDeviceRandom2 0x{ret & 0xFFFFFFFF:08X}")
+
+
 def main():
     if len(sys.argv) > 1 and sys.argv[1] == "--diag":
         return diag()
@@ -69,9 +153,20 @@ def main():
     except Exception as e:
         out(dict(id=0, ok=False, error=str(e)))
         return
-    act.ActLogicalStationNumber = station
-    rc = act.Open()
-    out(dict(id=0, ok=rc == 0, info=f"{pid} station {station}",
+    fast = None
+    try:
+        fast = VtableMx(act, pid)
+        rc = fast.open(station)
+        if rc != 0:
+            fast.close()
+            fast = None
+    except Exception as e:  # fall back to one IDispatch call per device
+        sys.stderr.write(f"batched MX access unavailable: {e}\n")
+        fast = None
+    if fast is None:
+        act.ActLogicalStationNumber = station
+        rc = act.Open()
+    out(dict(id=0, ok=rc == 0, info=f"{pid} station {station}" + (" · batched" if fast else ""),
              error=None if rc == 0 else
              f"Open failed 0x{rc & 0xFFFFFFFF:08X} - check that GX Works3 simulation is running "
              f"(Debug > Simulation > Start Simulation) and station {station} targets GX Simulator3"))
@@ -82,7 +177,12 @@ def main():
         req = None
         try:
             req = json.loads(line.lstrip("﻿"))  # tolerate a UTF-8 BOM (e.g. PowerShell pipes)
-            if req["op"] == "get":
+            if fast and req["op"] == "get":
+                out(dict(id=req["id"], ok=True, values=fast.get(req["devs"])))
+            elif fast and req["op"] == "set":
+                fast.set(req["devs"], req["values"])
+                out(dict(id=req["id"], ok=True))
+            elif req["op"] == "get":
                 vals = []
                 for d in req["devs"]:
                     ret, v = unpack(act.GetDevice2(d, 0))
@@ -100,7 +200,10 @@ def main():
                 out(dict(id=req["id"], ok=True))
         except Exception as e:
             out(dict(id=req.get("id", -1) if isinstance(req, dict) else -1, ok=False, error=str(e)))
-    act.Close()
+    if fast:
+        fast.close()
+    else:
+        act.Close()
 
 
 def out(obj):
