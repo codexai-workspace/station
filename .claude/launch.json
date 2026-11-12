@@ -1,0 +1,1 @@
+﻿{"version":"0.0.1","configurations":[{"name":"twin","runtimeExecutable":"py","runtimeArgs":["-3","-m","http.server","8000","--bind","127.0.0.1","--directory","induvara_sorting_twin"],"port":8000}]}

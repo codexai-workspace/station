@@ -1,0 +1,1 @@
+{"version":"0.0.1","configurations":[{"name":"twin-bridge","runtimeExecutable":"node","runtimeArgs":["bridge/server.js","--port","8010"],"port":8010,"autoPort":false},{"name":"mock-plc","runtimeExecutable":"node","runtimeArgs":["bridge/mock-plc.js"],"port":5007,"autoPort":false}]}
